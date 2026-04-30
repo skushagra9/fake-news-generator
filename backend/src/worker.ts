@@ -30,18 +30,21 @@ worker.on("failed", (job, err) => {
 });
 
 // ---------------------------------------------------------------------------
-// Reconciliation sweep — runs every 5 minutes.
+// Reconciliation sweep — runs every 30 seconds.
 //
 // Problem it solves: if a worker crashes mid-job, or Redis loses a job entry
 // (e.g. after a restart without AOF), the DB row stays PENDING/PROCESSING
 // forever but nothing in the queue will ever pick it up. This sweep finds
 // those "orphaned" rows and re-enqueues them so they get processed.
 //
-// Threshold: we only re-enqueue rows whose updated_at is >5 min old, so we
+// Threshold: we only re-enqueue rows whose updated_at is >60s old, so we
 // don't race with an actively-running job that just hasn't finished yet.
+// The previous 5-minute window meant the UI sat on "processing" for many
+// minutes even after the underlying job had silently died — now recovery
+// happens within a minute and the polling UI flips to COMPLETED quickly.
 // ---------------------------------------------------------------------------
-const RECONCILE_INTERVAL_MS  = 5 * 60 * 1000; // 5 minutes
-const STUCK_THRESHOLD_MS     = 5 * 60 * 1000; // row must be untouched for 5 min
+const RECONCILE_INTERVAL_MS  = 30 * 1000; // 30 seconds
+const STUCK_THRESHOLD_MS     = 60 * 1000; // row must be untouched for 60s
 
 async function reconcileStuckJobs() {
   const cutoff = new Date(Date.now() - STUCK_THRESHOLD_MS);
@@ -97,12 +100,12 @@ const reconcileTimer = setInterval(() => {
 }, RECONCILE_INTERVAL_MS);
 
 // Fire once shortly after startup so stuck jobs from a previous crash are
-// recovered quickly, without waiting a full 5 minutes.
+// recovered quickly, without waiting a full sweep cycle.
 setTimeout(() => {
   reconcileStuckJobs().catch((err) =>
     logger.error({ err }, "reconciler: initial sweep failed")
   );
-}, 15_000);
+}, 5_000);
 
 // ---------------------------------------------------------------------------
 // Graceful shutdown — important so Docker's SIGTERM doesn't drop in-flight

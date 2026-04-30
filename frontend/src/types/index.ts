@@ -18,6 +18,9 @@ export type Article = {
     fakeTitle: string | null;
     fakeDescription: string | null;
     status: FakeStatus;
+    // ISO timestamp of last status change. Used by the UI to detect rows
+    // that have been PENDING/PROCESSING too long so it can auto-retry.
+    updatedAt?: string;
     modelUsed?: string | null;
     errorMessage?: string | null;
   } | null;

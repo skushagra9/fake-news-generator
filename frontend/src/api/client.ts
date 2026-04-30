@@ -43,6 +43,12 @@ export const api = {
   getArticle: (id: string) =>
     http<{ article: Article }>(`/api/articles/${id}`),
 
+  retryArticle: (id: string) =>
+    http<{ enqueued: boolean; status: string }>(
+      `/api/articles/${id}/retry`,
+      { method: "POST" }
+    ),
+
   triggerScrape: () =>
     http<ScrapeResult>(`/api/scrape`, { method: "POST" }),
 
