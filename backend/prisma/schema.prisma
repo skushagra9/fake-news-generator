@@ -1,0 +1,95 @@
+// Prisma schema. Migrations live in prisma/migrations and are applied at
+// container start via `prisma migrate deploy` (see docker-compose.yml).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// One row per RSS feed we ingest from. Seeded at startup.
+model Source {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  rssUrl    String   @unique @map("rss_url")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  articles Article[]
+
+  @@map("sources")
+}
+
+// The ORIGINAL scraped article. We never mutate this — it's the source of truth
+// we link the satirical version back to.
+model Article {
+  id          String   @id @default(cuid())
+  sourceId    String   @map("source_id")
+  source      Source   @relation(fields: [sourceId], references: [id])
+  title       String
+  description String   @db.Text
+  url         String   @unique // dedupe key across re-scrapes
+  publishedAt DateTime @map("published_at")
+  scrapedAt   DateTime @default(now()) @map("scraped_at")
+
+  fake     FakeArticle?
+  messages ChatMessage[]
+
+  @@index([publishedAt(sort: Desc)])
+  @@index([sourceId, publishedAt(sort: Desc)])
+  @@map("articles")
+}
+
+// The satirical/fake version. Separate table (vs columns on Article) because:
+//  - it's generated asynchronously and may fail/retry independently
+//  - it has its own lifecycle (status, model used, generated_at)
+//  - it cleanly enforces 1:1 via the unique FK and lets us query
+//    "articles with no fake yet" via a left-join.
+enum FakeStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model FakeArticle {
+  id              String     @id @default(cuid())
+  articleId       String     @unique @map("article_id")
+  article         Article    @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  fakeTitle       String?
+  fakeDescription String?    @db.Text
+  modelUsed       String?    @map("model_used")
+  status          FakeStatus @default(PENDING)
+  errorMessage    String?    @map("error_message") @db.Text
+  attempts        Int        @default(0)
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("fake_articles")
+}
+
+// Chat history scoped per article. We keep role + content in OpenAI's chat
+// format so we can replay the thread directly into the API on each turn.
+enum ChatRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  articleId String   @map("article_id")
+  article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  role      ChatRole
+  content   String   @db.Text
+  // For structured queries we tag the kind so the UI can render entity lists
+  // as chips instead of plain text. NULL for free-form chat.
+  queryKind String?  @map("query_kind")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([articleId, createdAt])
+  @@map("chat_messages")
+}
